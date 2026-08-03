@@ -67,6 +67,14 @@ const POWERUP_DROP_CHANCE = 0.12;  // probabilidad de drop por asteroide destrui
 const POWERUP_DURATION    = 5;     // segundos de empuje duplicado
 const POWERUP_RADIUS      = 14;
 
+// ── Estrella fugaz (cometa) ───────────────────────────────────────────────────
+const SHOOTINGSTAR_SPAWN_CHANCE = 0.02;  // probabilidad por segundo de aparecer
+const SHOOTINGSTAR_TTL          = 3.5;   // segundos de vida útil
+const SHOOTINGSTAR_SPEED        = 240;   // px/s (≈3× más rápido que asteroide tamaño 3)
+const SHOOTINGSTAR_POINTS       = 250;   // bonus alto
+const SHOOTINGSTAR_RADIUS       = 12;    // tamaño del núcleo
+const SHOOTINGSTAR_TRAIL_LEN    = 12;    // muestra de posiciones para la estela
+
 class Asteroid {
   constructor(x, y, size = 3) {
     this.x    = x;
@@ -120,6 +128,66 @@ class Asteroid {
     ctx.closePath();
     ctx.stroke();
     ctx.restore();
+  }
+}
+
+// ── Estrella fugaz (cometa con estela) ────────────────────────────────────────
+class ShootingStar {
+  constructor(x, y, angle) {
+    this.x      = x;
+    this.y      = y;
+    const speed = SHOOTINGSTAR_SPEED + rand(-20, 20);
+    this.vx     = Math.cos(angle) * speed;
+    this.vy     = Math.sin(angle) * speed;
+    this.radius = SHOOTINGSTAR_RADIUS;
+    this.ttl    = SHOOTINGSTAR_TTL;
+    this.life   = SHOOTINGSTAR_TTL;   // para calcular alpha de desaparición
+    this.trail  = [];                  // historial de posiciones recientes
+    this.rot    = angle;
+    this.dead   = false;
+  }
+
+  update(dt) {
+    this.x = wrap(this.x + this.vx * dt, W);
+    this.y = wrap(this.y + this.vy * dt, H);
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+
+    // Muestra la posición actual para la estela (con wrap, así se rompe la línea
+    // al cruzar un borde: guardamos también un flag de salto)
+    this.trail.unshift({ x: this.x, y: this.y });
+    if (this.trail.length > SHOOTINGSTAR_TRAIL_LEN) this.trail.pop();
+  }
+
+  draw() {
+    const fade = Math.min(this.ttl / this.life, 1);
+
+    // Estela: segmentos con grosor y alpha decrecientes
+    for (let i = 1; i < this.trail.length; i++) {
+      const a = this.trail[i - 1];
+      const b = this.trail[i];
+      // Saltar segmento si cruza un borde (wrap) para no dibujar línea a través
+      if (Math.abs(a.x - b.x) > W / 2 || Math.abs(a.y - b.y) > H / 2) continue;
+      const t = 1 - i / this.trail.length;
+      ctx.strokeStyle = `rgba(255, 240, 160, ${(t * fade * 0.8).toFixed(2)})`;
+      ctx.lineWidth   = (t * 3).toFixed(2);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+
+    // Núcleo brillante con halo
+    const r = this.radius * fade;
+    ctx.fillStyle = `rgba(255, 255, 200, ${(fade * 0.25).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, r + 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(255, 250, 220, ${fade.toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, Math.max(r, 1), 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
@@ -309,7 +377,7 @@ class Particle {
 }
 
 // ── Estado del juego ──────────────────────────────────────────────────────────
-let ship, bullets, asteroids, particles, powerups;
+let ship, bullets, asteroids, particles, powerups, shootingStars;
 let score, lives, level;
 let powerupsThisLevel;  // garantiza mínimo 1 power-up por nivel
 let state;      // 'playing' | 'dead' | 'gameover'
@@ -327,12 +395,27 @@ function spawnAsteroids(count) {
   }
 }
 
+// Aparece desde un borde con dirección hacia el área de juego
+function spawnShootingStar() {
+  const side = randInt(0, 3);  // 0:arriba 1:der 2:abajo 3:izq
+  let x, y, angle;
+  const cx = W / 2, cy = H / 2;
+  if (side === 0)      { x = rand(0, W); y = 0; }
+  else if (side === 1) { x = W;          y = rand(0, H); }
+  else if (side === 2) { x = rand(0, W); y = H; }
+  else                 { x = 0;          y = rand(0, H); }
+  // Apunta al centro con variación aleatoria
+  angle = Math.atan2(cy - y, cx - x) + rand(-0.6, 0.6);
+  shootingStars.push(new ShootingStar(x, y, angle));
+}
+
 function initGame() {
   ship          = new Ship();
   bullets   = [];
   asteroids = [];
   particles = [];
   powerups  = [];
+  shootingStars = [];
   score  = 0;
   lives  = 3;
   level  = 1;
@@ -346,6 +429,7 @@ function nextLevel() {
   bullets   = [];
   particles = [];
   powerups  = [];
+  shootingStars = [];
   powerupsThisLevel = 0;
   ship.reset();
   spawnAsteroids(3 + level);
@@ -395,6 +479,12 @@ function update(dt) {
   asteroids.forEach(a => a.update(dt));
   particles.forEach(p => p.update(dt));
   powerups.forEach(pu => pu.update(dt));
+  shootingStars.forEach(s => s.update(dt));
+
+  // Spawn por probabilidad (sólo una a la vez)
+  if (shootingStars.length === 0 && Math.random() < SHOOTINGSTAR_SPAWN_CHANCE * dt * 60) {
+    spawnShootingStar();
+  }
 
   bullets   = bullets.filter(b => !b.dead);
   particles = particles.filter(p => !p.dead);
@@ -422,6 +512,20 @@ function update(dt) {
   asteroids = asteroids.filter(a => !a.dead).concat(newAsteroids);
   bullets   = bullets.filter(b => !b.dead);
 
+  // Bala vs estrella fugaz (bonus alto, no se divide)
+  for (const b of bullets) {
+    for (const s of shootingStars) {
+      if (!s.dead && !b.dead && dist(b, s) < s.radius) {
+        b.dead = true;
+        s.dead = true;
+        score += SHOOTINGSTAR_POINTS;
+        explode(s.x, s.y, 12);
+      }
+    }
+  }
+  bullets       = bullets.filter(b => !b.dead);
+  shootingStars = shootingStars.filter(s => !s.dead);
+
   // Nave vs power-up (recogida automática, reinicia timer a 5s)
   if (!ship.dead) {
     for (const pu of powerups) {
@@ -439,6 +543,15 @@ function update(dt) {
       if (dist(ship, a) < ship.radius + a.radius * 0.82) {
         killShip();
         break;
+      }
+    }
+    // Nave vs estrella fugaz (daña igual que un asteroide)
+    if (!ship.dead) {
+      for (const s of shootingStars) {
+        if (dist(ship, s) < ship.radius + s.radius) {
+          killShip();
+          break;
+        }
       }
     }
   }
@@ -503,6 +616,7 @@ function draw() {
 
   particles.forEach(p => p.draw());
   asteroids.forEach(a => a.draw());
+  shootingStars.forEach(s => s.draw());
   powerups.forEach(pu => pu.draw());
   bullets.forEach(b => b.draw());
   ship.draw();
