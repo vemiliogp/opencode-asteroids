@@ -1,0 +1,354 @@
+# Triage automático cuando se abre un issue:
+# - job "labels": detecta palabras clave en el título y el cuerpo, y asigna
+#   etiquetas (creándolas si no existen en el repo).
+# - job "resumen": opencode (agente plan, solo lectura) genera una sección
+#   "Información para revisión" que se anexa al final del cuerpo del issue
+#   sin modificar el texto original del autor.
+
+name: Triage de issues
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  labels:
+    name: Etiquetar por palabras clave
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Detectar y asignar labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue
+            const texto = `${issue.title}\n${issue.body || ""}`.toLowerCase()
+
+            // Fuentes de regex por label. El helper exige que la coincidencia
+            // no forme parte de una palabra más larga (p. ej. "idea" no debe
+            // matchear "ideal", ni "nave" a "navegador").
+            const LETRAS = "a-záéíóúüñ"
+            const alBorde = (fuente) =>
+              new RegExp(`(^|[^${LETRAS}])(?:${fuente})(?![${LETRAS}])`)
+
+            const reglas = [
+              {
+                label: "bug",
+                color: "d73a4a",
+                descripcion: "Algo no funciona como se espera",
+                palabras: [
+                  "error(?:es)?",
+                  "fallo(?:s)?",
+                  "falla(?:s)?",
+                  "fallando",
+                  "falló",
+                  "no funciona",
+                  "no va(?:n)?",
+                  "no anda",
+                  "no jala",
+                  "no aparece",
+                  "no se ve",
+                  "desaparec[a-záéíóúüñ]*",
+                  "deja de funcionar",
+                  "romp[a-záéíóúüñ]*",
+                  "crash[a-záéíóúüñ]*",
+                  "cuelga",
+                  "colg[a-záéíóúüñ]*",
+                  "rot[oa]s?",
+                  "bug",
+                  "excepci[a-záéíóúüñ]*",
+                  "pantallazo",
+                  "glitch[a-záéíóúüñ]*",
+                  "broken",
+                ],
+              },
+              {
+                label: "enhancement",
+                color: "a2eeef",
+                descripcion: "Nueva funcionalidad o mejora",
+                palabras: [
+                  "mejor[a-záéíóúüñ]*",
+                  "feature",
+                  "funcionalidad(?:es)?",
+                  "agreg[a-záéíóúüñ]*",
+                  "añad[a-záéíóúüñ]*",
+                  "podr(?:ía|ían|ías)",
+                  "sería (?:bueno|buena|genial|útil)",
+                  "estaría bien",
+                  "propuesta",
+                  "sugerencia",
+                  "sugier[a-záéíóúüñ]*",
+                  "ideas?",
+                  "me gustaría",
+                  "quisiera",
+                  "incluir",
+                  "incluy[a-záéíóúüñ]*",
+                  "enhancement",
+                ],
+              },
+              {
+                label: "question",
+                color: "d876e3",
+                descripcion: "Consulta o duda",
+                palabras: [
+                  "preguntas?",
+                  "dudas?",
+                  "consulta",
+                  "aclaraci[a-záéíóúüñ]*",
+                  "cómo (?:puedo|puedes|hago|haces|se hace|funciona|se llama)",
+                  "como (?:puedo|hago|se hace|funciona|se llama)",
+                  "ayuda",
+                  "cu(?:á|a)l es",
+                  "es posible",
+                  "se puede (?:hacer|agregar|añadir|poner|activar|desactivar)",
+                  "alguien sabe",
+                  "question",
+                  "how (?:do i|to)",
+                ],
+              },
+              {
+                label: "documentation",
+                color: "0075ca",
+                descripcion: "Documentación o comentarios",
+                palabras: [
+                  "document[a-záéíóúüñ]*",
+                  "docs?",
+                  "readme",
+                  "comentarios?",
+                  "documentation",
+                ],
+              },
+              {
+                label: "performance",
+                color: "fbca04",
+                descripcion: "Rendimiento o velocidad",
+                palabras: [
+                  "lent[a-záéíóúüñ]*",
+                  "lag",
+                  "fps",
+                  "rendimiento",
+                  "optimiz[a-záéíóúüñ]*",
+                  "jank[a-záéíóúüñ]*",
+                  "consume",
+                  "consumo",
+                  "memoria",
+                  "cpu",
+                  "slow",
+                ],
+              },
+              {
+                label: "gameplay",
+                color: "0e8a16",
+                descripcion: "Mecánica del juego",
+                palabras: [
+                  "naves?",
+                  "asteroide(?:s)?",
+                  "dispar[a-záéíóúüñ]*",
+                  "balas?",
+                  "colisi[a-záéíóúüñ]*",
+                  "choc[a-záéíóúüñ]*",
+                  "puntuaci[a-záéíóúüñ]*",
+                  "puntos",
+                  "score",
+                  "nivel(?:es)?",
+                  "vidas?",
+                  "muer[a-záéíóúüñ]*",
+                  "muri[a-záéíóúüñ]*",
+                  "ovnis?",
+                  "enemig[a-záéíóúüñ]*",
+                  "spawn[a-záéíóúüñ]*",
+                  "paus[a-záéíóúüñ]*",
+                  "game ?over",
+                  "power-?ups?",
+                  "escudos?",
+                  "hiper ?espacio",
+                  "thrust",
+                  "impuls[a-záéíóúüñ]*",
+                  "rotaci[a-záéíóúüñ]*",
+                  "gir[a-záéíóúüñ]*",
+                  "controles?",
+                  "teclas?",
+                  "ship",
+                  "asteroids?",
+                  "levels?",
+                  "lives",
+                ],
+              },
+            ]
+
+            const encontradas = reglas.filter((r) =>
+              r.palabras.some((p) => alBorde(p).test(texto)),
+            )
+
+            if (encontradas.length === 0) {
+              encontradas.push({
+                label: "needs-triage",
+                color: "e99695",
+                descripcion: "Requiere clasificación manual",
+              })
+            }
+
+            const nombres = encontradas.map((r) => r.label)
+            core.info(`Labels detectadas: ${nombres.join(", ")}`)
+
+            for (const regla of encontradas) {
+              const base = {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: regla.label,
+              }
+              try {
+                await github.rest.issues.getLabel(base)
+              } catch (e) {
+                if (e.status !== 404) throw e
+                try {
+                  await github.rest.issues.createLabel({
+                    ...base,
+                    color: regla.color,
+                    description: regla.descripcion,
+                  })
+                  core.info(`Label creada: ${regla.label}`)
+                } catch (e2) {
+                  if (e2.status !== 422) throw e2 // 422 = ya existe (carrera)
+                }
+              }
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              labels: nombres,
+            })
+            core.info(`Labels aplicadas al issue #${issue.number}: ${nombres.join(", ")}`)
+
+  resumen:
+    name: Anexar resumen generado por opencode
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Descargar el repositorio (contexto para el agente)
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Instalar opencode
+        run: |
+          curl -fsSL https://opencode.ai/install | bash
+          echo "$HOME/.opencode/bin" >> $GITHUB_PATH
+
+      - name: Preparar el prompt del issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs")
+            const issue = context.payload.issue
+
+            // El prompt se arma como líneas de un array para no introducir
+            // saltos de columna 0 dentro del block scalar de YAML.
+            const lineas = [
+              'Eres el agente de triage de este repositorio. Se acaba de abrir un issue y tu tarea es generar, en español, una sección de "información para revisión" que se anexará al final de su cuerpo.',
+              "",
+              "Explora primero el repositorio (AGENTS.md, README.md, game.js, index.html) para conocer el contexto: es un juego de Asteroids en HTML5 Canvas puro, sin build ni dependencias, con toda la lógica en un único game.js.",
+              "",
+              'Genera EXCLUSIVAMENTE markdown con esta estructura (usa títulos de nivel "###"):',
+              "",
+              "### Resumen",
+              "1 a 3 frases que resuman el problema o la solicitud.",
+              "",
+              "### Área afectada",
+              "Una sola línea: gameplay, visual, audio, documentación, CI, u otra (especifica cuál).",
+              "",
+              "### Contexto del repo",
+              "2 a 4 viñetas con datos del repositorio útiles para revisar este issue (stack, convenciones, restricciones relacionadas con el tema).",
+              "",
+              "### Cómo verificar",
+              "Pasos concretos para reproducir o verificar (por ejemplo: abrir index.html en el navegador y probar los controles).",
+              "",
+              "Reglas estrictas:",
+              "- Tu única salida de texto debe ser la sección final: nada de narración de pasos intermedios, sin saludos, sin notas finales y sin envolver toda la respuesta en un bloque de código.",
+              "- Si el issue es muy corto o ambiguo, dilo en el Resumen y sugiere qué información falta.",
+              "- No modifiques archivos ni hagas commit: este es un análisis de solo lectura.",
+              "",
+              "<issue>",
+              `Número: #${issue.number}`,
+              `Título: ${issue.title}`,
+              `Autor: ${issue.user.login}`,
+              "Cuerpo:",
+              issue.body || "(vacío)",
+              "</issue>",
+            ]
+
+            const prompt = lineas.join("\n")
+            fs.writeFileSync("prompt.txt", prompt)
+            core.info(`Prompt preparado (${prompt.length} caracteres)`)
+
+      - name: Generar resumen con opencode (agente plan, solo lectura)
+        timeout-minutes: 5
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          set -o pipefail
+          opencode run \
+            --agent plan \
+            --model opencode-go/glm-5.2 \
+            --format json \
+            "$(cat prompt.txt)" \
+            | jq -nRr '[inputs | fromjson? | select(.type == "text") | .part.text] | last // empty' \
+              > summary.md
+          echo "Caracteres del resumen: $(wc -c < summary.md)"
+          test -s summary.md || { echo "summary.md quedó vacío"; exit 1; }
+
+      - name: Anexar la sección al final del issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs")
+            const marker = "<!-- generado-por-opencode -->"
+
+            let summary = fs.readFileSync("summary.md", "utf8")
+            // Por si el modelo envolvió toda la respuesta en un bloque de código
+            summary = summary
+              .replace(/^```[^\n]*\n/, "")
+              .replace(/\n?```\s*$/, "")
+              .trim()
+
+            if (!summary) {
+              core.setFailed("El resumen generado está vacío; no se modifica el issue.")
+              return
+            }
+
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const numero = context.payload.issue.number
+
+            // Se usa el cuerpo actual, por si el autor lo editó tras crear el issue
+            const { data: issue } = await github.rest.issues.get({
+              owner,
+              repo,
+              issue_number: numero,
+            })
+
+            if ((issue.body || "").includes(marker)) {
+              core.info("El issue ya contiene la sección generada; no se duplica.")
+              return
+            }
+
+            // El texto original se preserva byte a byte; solo se anexa al final
+            const original = issue.body == null ? "" : issue.body
+            const cuerpo = original
+              ? `${original}\n\n---\n\n## 🤖 Información para revisión\n${marker}\n\n${summary}`
+              : `## 🤖 Información para revisión\n${marker}\n\n${summary}`
+
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number: numero,
+              body: cuerpo,
+            })
+            core.info(`Issue #${numero} actualizado (${summary.length} caracteres de resumen).`)
